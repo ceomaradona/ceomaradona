@@ -8,12 +8,11 @@ app.get('/', (_req, res) => {
   res.status(200).json({ ok: true, ts: new Date().toISOString() });
 });
 
-// health: texto puro "ok"
+// health: texto "ok"
 app.get('/health', (_req, res) => {
   res.type('text/plain').send('ok');
 });
 
-// a PORT vem do Railway; fallback 8080
 const PORT = Number(process.env.PORT || 8080);
 const HOST = '0.0.0.0';
 
