@@ -1,129 +1,113 @@
-// server.mjs
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { createClient } from '@supabase/supabase-js';
 
-/** ========= Variáveis de ambiente ========= */
-const { SUPABASE_URL, SUPABASE_KEY, PORT: RAILWAY_PORT } = process.env;
+// ==== Variáveis de ambiente ====
+const { SUPABASE_URL, SUPABASE_KEY, PORT } = process.env;
 
 if (!SUPABASE_URL || !SUPABASE_KEY) {
-  console.error('❌ Faltam SUPABASE_URL e/ou SUPABASE_KEY nas variáveis de ambiente.');
+  console.error("Faltam SUPABASE_URL ou SUPABASE_KEY nas variáveis de ambiente.");
   process.exit(1);
 }
 
-// Cliente Supabase
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// App Express
+// ==== App Express ====
 const app = express();
+
+// CORS (liberado geral nesta primeira etapa)
+app.use(cors());
 app.use(express.json());
 
-/** ========= CORS (libere seu app e o localhost) ========= */
-// Ajuste a allowlist quando tiver a URL final do Lovable / seu front
-const ALLOWED_ORIGINS = [
-  'http://localhost:3000',
-  'https://seu-app-do-lovable.app' // troque quando tiver sua URL
-];
+// ==== Rotas ====
 
-app.use(
-  cors({
-    origin(origin, cb) {
-      // permite ferramentas como curl/postman (sem origin)
-      if (!origin) return cb(null, true);
-      if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
-      return cb(new Error('Not allowed by CORS'));
-    }
-  })
-);
-
-/** ========= Health ========= */
-app.get('/', (_req, res) => {
-  res.status(200).send('✅ Servidor online!');
+// Health (para monitor e para você testar)
+app.get('/health', (_req, res) => {
+  res.status(200).send('ok');
 });
 
-/** ========= Endpoints da API =========
- * Ajustados para os nomes das views/tabelas que você criou no Supabase:
- * - subscription_history                      (tabela)
- * - current_user_subscription_view            (view)
- * - active_user_subscriptions_view            (view)
- */
+// Raiz (abre uma página simples)
+app.get('/', (_req, res) => {
+  res.status(200).send('<pre>Servidor online! Use /health e os endpoints da API.</pre>');
+});
 
-// 1) Histórico completo do usuário
+// Histórico completo de assinaturas por usuário
 app.get('/subscriptions/history', async (req, res) => {
   try {
-    const user_id = req.query.user_id;
-    if (!user_id) return res.status(400).json({ error: 'Parâmetro user_id é obrigatório' });
+    const userId = req.query.user_id;
+    if (!userId) return res.status(400).json({ error: 'user_id é obrigatório' });
 
     const { data, error } = await supabase
-      .from('subscription_history')
+      .from('user_subscriptions')
       .select('*')
-      .eq('user_id', user_id)
+      .eq('user_id', userId)
       .order('created_at', { ascending: true });
 
     if (error) throw error;
-    res.json(data ?? []);
+    res.json(data);
   } catch (err) {
-    res.status(500).json({ error: err.message || 'Erro interno' });
+    res.status(500).json({ status: 'error', code: 500, message: String(err.message || err) });
   }
 });
 
-// 2) Última assinatura do usuário
+// Última assinatura do usuário (mais recente)
 app.get('/subscriptions/latest', async (req, res) => {
   try {
-    const user_id = req.query.user_id;
-    if (!user_id) return res.status(400).json({ error: 'Parâmetro user_id é obrigatório' });
+    const userId = req.query.user_id;
+    if (!userId) return res.status(400).json({ error: 'user_id é obrigatório' });
 
     const { data, error } = await supabase
-      .from('current_user_subscription_view')
+      .from('user_subscriptions')
       .select('*')
-      .eq('user_id', user_id)
+      .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .limit(1);
 
     if (error) throw error;
-    res.json(data?.[0] ?? null);
+    res.json(data?.[0] || null);
   } catch (err) {
-    res.status(500).json({ error: err.message || 'Erro interno' });
+    res.status(500).json({ status: 'error', code: 500, message: String(err.message || err) });
   }
 });
 
-// 3) Contagem de assinaturas ativas (todas)
+// Contagem de assinaturas ativas (global)
 app.get('/subscriptions/count/active', async (_req, res) => {
   try {
     const { count, error } = await supabase
-      .from('active_user_subscriptions_view')
-      .select('id', { count: 'exact', head: true });
+      .from('user_subscriptions')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'active');
 
     if (error) throw error;
     res.json({ active_count: count ?? 0 });
   } catch (err) {
-    res.status(500).json({ error: err.message || 'Erro interno' });
+    res.status(500).json({ status: 'error', code: 500, message: String(err.message || err) });
   }
 });
 
-// 4) Assinaturas ativas por usuário
+// Assinaturas ativas por usuário
 app.get('/subscriptions/active-by-user', async (req, res) => {
   try {
-    const user_id = req.query.user_id;
-    if (!user_id) return res.status(400).json({ error: 'Parâmetro user_id é obrigatório' });
+    const userId = req.query.user_id;
+    if (!userId) return res.status(400).json({ error: 'user_id é obrigatório' });
 
     const { data, error } = await supabase
-      .from('active_user_subscriptions_view')
+      .from('user_subscriptions')
       .select('*')
-      .eq('user_id', user_id);
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false });
 
     if (error) throw error;
-    res.json(data ?? []);
+    res.json(data);
   } catch (err) {
-    res.status(500).json({ error: err.message || 'Erro interno' });
+    res.status(500).json({ status: 'error', code: 500, message: String(err.message || err) });
   }
 });
 
-/** ========= Start do servidor =========
- * IMPORTANTE: ouvir a porta do Railway
- */
-const PORT = RAILWAY_PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🚀 Servidor rodando na porta ${PORT}`);
+// ==== Suba o servidor ====
+const port = Number(PORT) || 3000;
+app.listen(port, () => {
+  console.log(`✅ Servidor rodando na porta ${port}`);
 });
