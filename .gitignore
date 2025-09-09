@@ -1,0 +1,13 @@
+# dependências
+node_modules/
+
+# variáveis de ambiente
+.env
+
+# logs e ruído
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.DS_Store
+*.log

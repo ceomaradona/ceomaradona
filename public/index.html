@@ -1,0 +1,38 @@
+﻿<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Planner API Demo</title>
+  <style>
+    body{font-family:system-ui,Arial;padding:24px;max-width:980px;margin:auto;background:#0b1020;color:#e6e9f2}
+    h1{margin:0 0 8px}
+    .row{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+    input,button,select{font:inherit;padding:10px;border-radius:10px;border:1px solid #3a4263;background:#131a33;color:#e6e9f2}
+    button{cursor:pointer}
+    pre{background:#0f1630;border:1px solid #233056;border-radius:12px;padding:14px;overflow:auto}
+    footer{opacity:.7;margin-top:24px}
+  </style>
+</head>
+<body>
+  <h1>Planner API – Demo</h1>
+  <small id="base"></small>
+
+  <div class="row">
+    <label>USER_ID:
+      <input id="userId" size="40" value="6790b75c-80f9-4134-9220-e9e634a60ed9" />
+    </label>
+    <button onclick="call('/subscriptions/all')">Todas</button>
+    <button onclick="call('/subscriptions/count/active')">Contagem Ativas</button>
+    <button onclick="user('/subscriptions/user/')">Ativas por usuário</button>
+    <button onclick="user('/subscriptions/history/')">Histórico do usuário</button>
+    <button onclick="user('/subscriptions/latest/')">Última do usuário</button>
+  </div>
+
+  <pre id="out">// Resultado aparece aqui…</pre>
+
+  <footer>Feito rápido só para testes 🙂</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
