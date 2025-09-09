@@ -1,8 +1,8 @@
 {
-  "name": "ceomaradona-api",
+  "name": "ceomaradona",
   "version": "1.0.0",
-  "private": true,
   "type": "module",
+  "main": "server.mjs",
   "scripts": {
     "start": "node server.mjs"
   },

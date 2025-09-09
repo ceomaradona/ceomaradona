@@ -1,22 +1,22 @@
-// server.mjs — diagnóstico mínimo estável
+// server.mjs - diagnóstico mínimo
 import express from 'express';
 
 const app = express();
 
 // raiz: JSON simples
 app.get('/', (_req, res) => {
-  res.status(200).json({ status: 'ok' });
+  res.status(200).json({ ok: true, ts: new Date().toISOString() });
 });
 
-// health: texto simples (HEAD/GET)
+// health: texto puro "ok"
 app.get('/health', (_req, res) => {
   res.type('text/plain').send('ok');
 });
 
-// Porta/host — use a PORT do Railway; fallback só ajuda localmente
-const PORT = process.env.PORT || 8080;
+// a PORT vem do Railway; fallback 8080
+const PORT = Number(process.env.PORT || 8080);
 const HOST = '0.0.0.0';
 
 app.listen(PORT, HOST, () => {
-  console.log(`DIAG rodando na porta ${PORT} (host ${HOST})`);
+  console.log(`[diag] listening on http://${HOST}:${PORT}`);
 });
