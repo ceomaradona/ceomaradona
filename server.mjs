@@ -1,4 +1,4 @@
-// server.mjs — API alinhada com Supabase (tabela: assinaturas)
+// server.mjs — API alinhada ao Supabase (tabela: assinaturas)
 
 import 'dotenv/config';
 import express from 'express';
@@ -15,12 +15,14 @@ if (!SUPABASE_URL || !SUPABASE_KEY) {
 // ---- Supabase ----
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// ---- App Express ----
+// ---- App ----
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 // ---- Helpers ----
+const TBL = 'assinaturas'; // <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< IMPORTANTÍSSIMO
+
 function badRequest(res, msg) {
   return res.status(400).json({ status: 'error', message: msg });
 }
@@ -29,16 +31,24 @@ function handleSb(res, { data, error, status = 200 }) {
   return res.status(status).json(data);
 }
 
-// ------------------ ROTAS ------------------
+// ---- Diagnóstico rápido ----
+app.get('/diag', (_req, res) => {
+  res.status(200).json({
+    ok: true,
+    table: TBL,
+    env: {
+      hasUrl: Boolean(SUPABASE_URL),
+      hasKey: Boolean(SUPABASE_KEY),
+    },
+    ts: new Date().toISOString(),
+  });
+});
 
-// Healthcheck (texto)
+// ---- Health e Raiz ----
 app.get('/health', (_req, res) => res.type('text/plain').send('ok'));
-
-// Raiz (diagnóstico rápido)
 app.get('/', (_req, res) => res.status(200).json({ ok: true, ts: new Date().toISOString() }));
 
-// Nome da tabela no Supabase (PT-BR)
-const TBL = 'assinaturas';
+// ---- Rotas de assinaturas ----
 
 // Histórico completo do usuário
 // GET /subscriptions/history?user_id=<uuid>
@@ -91,7 +101,7 @@ app.get('/subscriptions/active-by-user', async (req, res) => {
   if (!userId) return badRequest(res, 'Parâmetro user_id é obrigatório');
 
   const { data, error } = await supabase
-    .from(TBL)
+    .from(TBL)                         // <<<<<<<<<<<<<< usa SEMPRE 'assinaturas'
     .select('*')
     .eq('id_do_usuario', userId)
     .eq('status', 'ativo');
@@ -99,7 +109,7 @@ app.get('/subscriptions/active-by-user', async (req, res) => {
   return handleSb(res, { data, error });
 });
 
-// 404 padrão
+// 404
 app.use((_req, res) => res.status(404).json({ status: 'error', message: 'Not found' }));
 
 // Start (Railway)
