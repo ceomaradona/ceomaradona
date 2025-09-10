@@ -1,105 +1,173 @@
-// server.mjs — API alinhada ao Supabase (tabela: assinaturas)
+// server.mjs — API REST estável (assinaturas)
 
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { createClient } from '@supabase/supabase-js';
 
-const { SUPABASE_URL, SUPABASE_KEY, PORT } = process.env;
+/* ---- Variáveis de ambiente ---- */
+const {
+  SUPABASE_URL,
+  SUPABASE_KEY,
+  PORT = 8080,
+} = process.env;
+
 if (!SUPABASE_URL || !SUPABASE_KEY) {
-  console.error('Faltam SUPABASE_URL e/ou SUPABASE_KEY nas variáveis de ambiente');
+  console.error('Faltam SUPABASE_URL ou SUPABASE_KEY nas variáveis de ambiente');
   process.exit(1);
 }
 
+/* ---- Supabase ---- */
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+/* ---- App Express ---- */
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// IMPORTANTÍSSIMO: sempre daqui
-const TBL = 'assinaturas';
+/* ---- Helpers ---- */
+const ok = (res, data) => res.status(200).json({ status: 'ok', data });
+const bad = (res, code, message) =>
+  res.status(code).json({ status: 'error', message });
 
-const ok = (res, data) => res.status(200).json(data);
-const err = (res, e) => res.status(500).json({ status: 'error', message: e.message || String(e) });
-const bad = (res, m) => res.status(400).json({ status: 'error', message: m });
+function mapRow(r) {
+  // Tabela real: public.assinaturas
+  return {
+    id: r.id ?? null,
+    user_id: r.id_do_usuario,
+    status: r.status,
+    plan: r.plano,
+    price: r.preco,
+    start_date: r.data_de_inicio,
+    end_date: r.data_final,
+    created_at: r.criado_em,
+  };
+}
 
-// Health e raiz
-app.get('/health', (_req, res) => res.type('text/plain').send('ok'));
+async function historyByUser(user_id) {
+  const { data, error } = await supabase
+    .from('assinaturas')
+    .select('*')
+    .eq('id_do_usuario', user_id)
+    .order('data_de_inicio', { ascending: false });
+
+  if (error) throw error;
+  return (data ?? []).map(mapRow);
+}
+
+async function latestByUser(user_id) {
+  const { data, error } = await supabase
+    .from('assinaturas')
+    .select('*')
+    .eq('id_do_usuario', user_id)
+    .order('data_de_inicio', { ascending: false })
+    .limit(1)
+    .single();
+
+  if (error && error.code !== 'PGRST116') throw error; // not found
+  return data ? mapRow(data) : null;
+}
+
+async function countActive() {
+  const { count, error } = await supabase
+    .from('assinaturas')
+    .select('id', { count: 'exact', head: true })
+    .eq('status', 'ativo');
+
+  if (error) throw error;
+  return count ?? 0;
+}
+
+async function activeByUser(user_id) {
+  const { data, error } = await supabase
+    .from('assinaturas')
+    .select('*')
+    .eq('id_do_usuario', user_id)
+    .eq('status', 'ativo');
+
+  if (error) throw error;
+  return (data ?? []).map(mapRow);
+}
+
+/* ---- Rotas de diagnóstico ---- */
 app.get('/', (_req, res) => ok(res, { ok: true, ts: new Date().toISOString() }));
 
-// Diagnóstico rápido
-app.get('/diag', (_req, res) =>
+app.get('/health', (_req, res) => {
+  res.type('text/plain').send('ok');
+});
+
+app.get('/diag', (_req, res) => {
   ok(res, {
     ok: true,
-    table: TBL,
-    env: { hasUrl: !!process.env.SUPABASE_URL, hasKey: !!process.env.SUPABASE_KEY },
     ts: new Date().toISOString(),
-  })
-);
-
-// Histórico completo: ?user_id=<uuid>
-app.get('/subscriptions/history', async (req, res) => {
-  const userId = req.query.user_id;
-  if (!userId) return bad(res, 'Parâmetro user_id é obrigatório');
-
-  const { data, error } = await supabase
-    .from(TBL)
-    .select('*')
-    .eq('id_do_usuario', userId)
-    .order('criado_em', { ascending: true });
-
-  if (error) return err(res, error);
-  return ok(res, data);
+    env: {
+      hasUrl: !!SUPABASE_URL,
+      hasKey: !!SUPABASE_KEY,
+    },
+    table: 'assinaturas',
+  });
 });
 
-// Última assinatura: ?user_id=<uuid>
-app.get('/subscriptions/latest', async (req, res) => {
-  const userId = req.query.user_id;
-  if (!userId) return bad(res, 'Parâmetro user_id é obrigatório');
+/* ---- Rotas REST (MVP) ----
+   - Histórico do usuário
+   - Última assinatura do usuário
+   - Contagem de ativas (geral)
+   - Assinaturas ativas por usuário
+-------------------------------- */
 
-  const { data, error } = await supabase
-    .from(TBL)
-    .select('*')
-    .eq('id_do_usuario', userId)
-    .order('criado_em', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error) return err(res, error);
-  return ok(res, data);
+app.get('/users/:id/subscriptions/history', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!id) return bad(res, 400, 'user_id ausente');
+    const data = await historyByUser(id);
+    return ok(res, data);
+  } catch (err) {
+    return next(err);
+  }
 });
 
-// Contagem de todas ativas (geral)
-app.get('/subscriptions/count/active', async (_req, res) => {
-  const { count, error } = await supabase
-    .from(TBL)
-    .select('*', { count: 'exact', head: true })
-    .eq('status', 'ativo');
-
-  if (error) return err(res, error);
-  return ok(res, { status: 'ok', count: count ?? 0 });
+app.get('/users/:id/subscriptions/latest', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!id) return bad(res, 400, 'user_id ausente');
+    const data = await latestByUser(id);
+    return ok(res, data);
+  } catch (err) {
+    return next(err);
+  }
 });
 
-// Ativas do usuário: ?user_id=<uuid>
-app.get('/subscriptions/active-by-user', async (req, res) => {
-  const userId = req.query.user_id;
-  if (!userId) return bad(res, 'Parâmetro user_id é obrigatório');
-
-  const { data, error } = await supabase
-    .from(TBL)
-    .select('*')
-    .eq('id_do_usuario', userId)
-    .eq('status', 'ativo');
-
-  if (error) return err(res, error);
-  return ok(res, data);
+app.get('/subscriptions/active/count', async (_req, res, next) => {
+  try {
+    const count = await countActive();
+    return ok(res, { count });
+  } catch (err) {
+    return next(err);
+  }
 });
 
-// 404
-app.use((_req, res) => res.status(404).json({ status: 'error', message: 'Not found' }));
+app.get('/users/:id/subscriptions/active', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!id) return bad(res, 400, 'user_id ausente');
+    const data = await activeByUser(id);
+    return ok(res, data);
+  } catch (err) {
+    return next(err);
+  }
+});
 
+/* 404 para rotas desconhecidas */
+app.use((_req, res) => bad(res, 404, 'Not Found'));
+
+/* Handler global de erros */
+app.use((err, _req, res, _next) => {
+  console.error('[ERROR]', err);
+  return bad(res, 500, err?.message || 'Internal Server Error');
+});
+
+/* Start */
 const HOST = '0.0.0.0';
-const listenPort = Number(PORT) || 8080;
-app.listen(listenPort, HOST, () =>
-  console.log(`Servidor rodando na porta ${listenPort} (host ${HOST})`)
-);
+app.listen(PORT, HOST, () => {
+  console.log(`Servidor rodando na porta ${PORT} (host ${HOST})`);
+});
