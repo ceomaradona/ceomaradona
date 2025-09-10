@@ -1,4 +1,4 @@
-// server.mjs — API alinhada com Supabase em PT-BR
+// server.mjs — API alinhada com Supabase (tabela: assinaturas)
 
 import 'dotenv/config';
 import express from 'express';
@@ -24,7 +24,6 @@ app.use(express.json());
 function badRequest(res, msg) {
   return res.status(400).json({ status: 'error', message: msg });
 }
-
 function handleSb(res, { data, error, status = 200 }) {
   if (error) return res.status(500).json({ status: 'error', message: error.message });
   return res.status(status).json(data);
@@ -32,40 +31,43 @@ function handleSb(res, { data, error, status = 200 }) {
 
 // ------------------ ROTAS ------------------
 
-// Healthcheck simples (texto plano)
+// Healthcheck (texto)
 app.get('/health', (_req, res) => res.type('text/plain').send('ok'));
 
-// Raiz: resposta JSON rápida para diagnóstico
+// Raiz (diagnóstico rápido)
 app.get('/', (_req, res) => res.status(200).json({ ok: true, ts: new Date().toISOString() }));
 
-// Histórico completo por usuário
+// Nome da tabela no Supabase (PT-BR)
+const TBL = 'assinaturas';
+
+// Histórico completo do usuário
 // GET /subscriptions/history?user_id=<uuid>
 app.get('/subscriptions/history', async (req, res) => {
   const userId = req.query.user_id;
   if (!userId) return badRequest(res, 'Parâmetro user_id é obrigatório');
 
   const { data, error } = await supabase
-    .from('subscriptions')
+    .from(TBL)
     .select('*')
-    .eq('id_do_usuario', userId)        // <- coluna em PT-BR
+    .eq('id_do_usuario', userId)
     .order('criado_em', { ascending: true });
 
   return handleSb(res, { data, error });
 });
 
-// Última assinatura do usuário (mais recente)
+// Última assinatura do usuário
 // GET /subscriptions/latest?user_id=<uuid>
 app.get('/subscriptions/latest', async (req, res) => {
   const userId = req.query.user_id;
   if (!userId) return badRequest(res, 'Parâmetro user_id é obrigatório');
 
   const { data, error } = await supabase
-    .from('subscriptions')
+    .from(TBL)
     .select('*')
     .eq('id_do_usuario', userId)
     .order('criado_em', { ascending: false })
     .limit(1)
-    .maybeSingle(); // retorna null se não houver linha
+    .maybeSingle();
 
   return handleSb(res, { data, error });
 });
@@ -74,9 +76,9 @@ app.get('/subscriptions/latest', async (req, res) => {
 // GET /subscriptions/count/active
 app.get('/subscriptions/count/active', async (_req, res) => {
   const { count, error } = await supabase
-    .from('subscriptions')
+    .from(TBL)
     .select('*', { count: 'exact', head: true })
-    .eq('status', 'ativo');             // <- status em PT-BR
+    .eq('status', 'ativo');
 
   if (error) return res.status(500).json({ status: 'error', message: error.message });
   return res.status(200).json({ status: 'ok', count: count ?? 0 });
@@ -89,7 +91,7 @@ app.get('/subscriptions/active-by-user', async (req, res) => {
   if (!userId) return badRequest(res, 'Parâmetro user_id é obrigatório');
 
   const { data, error } = await supabase
-    .from('subscriptions')
+    .from(TBL)
     .select('*')
     .eq('id_do_usuario', userId)
     .eq('status', 'ativo');
@@ -97,10 +99,10 @@ app.get('/subscriptions/active-by-user', async (req, res) => {
   return handleSb(res, { data, error });
 });
 
-// ---- Erro 404 padrão
+// 404 padrão
 app.use((_req, res) => res.status(404).json({ status: 'error', message: 'Not found' }));
 
-// ---- Start (Railway usa process.env.PORT). Bind em 0.0.0.0.
+// Start (Railway)
 const HOST = '0.0.0.0';
 const listenPort = Number(PORT) || 8080;
 app.listen(listenPort, HOST, () => {
