@@ -1,4 +1,4 @@
-// server.mjs — API com Supabase (coluna user_id corrigida)
+// server.mjs — API alinhada com Supabase em PT-BR
 
 import 'dotenv/config';
 import express from 'express';
@@ -6,10 +6,7 @@ import cors from 'cors';
 import { createClient } from '@supabase/supabase-js';
 
 // ---- Variáveis de ambiente ----
-const { SUPABASE_URL, SUPABASE_KEY } = process.env;
-const PORT = Number(process.env.PORT ?? 8080);
-const HOST = '0.0.0.0';
-
+const { SUPABASE_URL, SUPABASE_KEY, PORT } = process.env;
 if (!SUPABASE_URL || !SUPABASE_KEY) {
   console.error('Faltam SUPABASE_URL e/ou SUPABASE_KEY nas variáveis de ambiente');
   process.exit(1);
@@ -23,102 +20,89 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ---- Rotas básicas ----
-// Healthcheck simples (texto)
+// ---- Helpers ----
+function badRequest(res, msg) {
+  return res.status(400).json({ status: 'error', message: msg });
+}
+
+function handleSb(res, { data, error, status = 200 }) {
+  if (error) return res.status(500).json({ status: 'error', message: error.message });
+  return res.status(status).json(data);
+}
+
+// ------------------ ROTAS ------------------
+
+// Healthcheck simples (texto plano)
 app.get('/health', (_req, res) => res.type('text/plain').send('ok'));
 
-// Página raiz (JSON)
-app.get('/', (_req, res) => {
-  res.status(200).json({ ok: true, ts: new Date().toISOString() });
-});
+// Raiz: resposta JSON rápida para diagnóstico
+app.get('/', (_req, res) => res.status(200).json({ ok: true, ts: new Date().toISOString() }));
 
-// ---- Helpers comuns ----
-function getUserId(req) {
-  // aceita ?user_id=... ou header x-user-id
-  return (req.query.user_id || req.get('x-user-id') || '').toString().trim();
-}
-
-function mapSupabaseError(error) {
-  return error?.message || 'Erro desconhecido';
-}
-
-// ---- Rotas de subscriptions ----
-
-// 1) Histórico completo do usuário
-// GET /subscriptions/history?user_id=UUID
+// Histórico completo por usuário
+// GET /subscriptions/history?user_id=<uuid>
 app.get('/subscriptions/history', async (req, res) => {
-  const user_id = getUserId(req);
-  if (!user_id) return res.status(400).json({ status: 'error', message: 'Informe user_id' });
+  const userId = req.query.user_id;
+  if (!userId) return badRequest(res, 'Parâmetro user_id é obrigatório');
 
   const { data, error } = await supabase
     .from('subscriptions')
     .select('*')
-    .eq('user_id', user_id)
-    .order('created_at', { ascending: false });
+    .eq('id_do_usuario', userId)        // <- coluna em PT-BR
+    .order('criado_em', { ascending: true });
 
-  if (error) return res.status(500).json({ status: 'error', message: mapSupabaseError(error) });
-  return res.json({ status: 'ok', data });
+  return handleSb(res, { data, error });
 });
 
-// 2) Última assinatura do usuário
-// GET /subscriptions/latest?user_id=UUID
+// Última assinatura do usuário (mais recente)
+// GET /subscriptions/latest?user_id=<uuid>
 app.get('/subscriptions/latest', async (req, res) => {
-  const user_id = getUserId(req);
-  if (!user_id) return res.status(400).json({ status: 'error', message: 'Informe user_id' });
+  const userId = req.query.user_id;
+  if (!userId) return badRequest(res, 'Parâmetro user_id é obrigatório');
 
   const { data, error } = await supabase
     .from('subscriptions')
     .select('*')
-    .eq('user_id', user_id)
-    .order('created_at', { ascending: false })
+    .eq('id_do_usuario', userId)
+    .order('criado_em', { ascending: false })
     .limit(1)
-    .maybeSingle();
+    .maybeSingle(); // retorna null se não houver linha
 
-  if (error) return res.status(500).json({ status: 'error', message: mapSupabaseError(error) });
-  return res.json({ status: 'ok', data });
+  return handleSb(res, { data, error });
 });
 
-// 3) Contagem de assinaturas ativas (geral)
+// Contagem de assinaturas ativas (geral)
 // GET /subscriptions/count/active
 app.get('/subscriptions/count/active', async (_req, res) => {
-  // Considera status 'ativo' (pt) e 'active' (en)
-  const { data, error } = await supabase
+  const { count, error } = await supabase
     .from('subscriptions')
-    .select('id', { count: 'exact', head: true })
-    .in('status', ['ativo', 'active']);
+    .select('*', { count: 'exact', head: true })
+    .eq('status', 'ativo');             // <- status em PT-BR
 
-  if (error) return res.status(500).json({ status: 'error', message: mapSupabaseError(error) });
-  return res.json({ status: 'ok', count: data === null ? 0 : data.length ?? 0 });
+  if (error) return res.status(500).json({ status: 'error', message: error.message });
+  return res.status(200).json({ status: 'ok', count: count ?? 0 });
 });
 
-// 4) Assinaturas ativas por usuário
-// GET /subscriptions/active-by-user?user_id=UUID
+// Assinaturas ativas por usuário
+// GET /subscriptions/active-by-user?user_id=<uuid>
 app.get('/subscriptions/active-by-user', async (req, res) => {
-  const user_id = getUserId(req);
-  if (!user_id) return res.status(400).json({ status: 'error', message: 'Informe user_id' });
+  const userId = req.query.user_id;
+  if (!userId) return badRequest(res, 'Parâmetro user_id é obrigatório');
 
   const { data, error } = await supabase
     .from('subscriptions')
     .select('*')
-    .eq('user_id', user_id)
-    .in('status', ['ativo', 'active'])
-    .order('created_at', { ascending: false });
+    .eq('id_do_usuario', userId)
+    .eq('status', 'ativo');
 
-  if (error) return res.status(500).json({ status: 'error', message: mapSupabaseError(error) });
-  return res.json({ status: 'ok', data });
+  return handleSb(res, { data, error });
 });
 
-// ---- Erro 404
+// ---- Erro 404 padrão
 app.use((_req, res) => res.status(404).json({ status: 'error', message: 'Not found' }));
 
-// ---- Erro global
-app.use((err, _req, res, _next) => {
-  console.error('Erro não tratado:', err);
-  res.status(500).json({ status: 'error', message: 'Erro interno' });
+// ---- Start (Railway usa process.env.PORT). Bind em 0.0.0.0.
+const HOST = '0.0.0.0';
+const listenPort = Number(PORT) || 8080;
+app.listen(listenPort, HOST, () => {
+  console.log(`Servidor rodando na porta ${listenPort} (host ${HOST})`);
 });
-
-// ---- Start
-app.listen(PORT, HOST, () => {
-  console.log(`Servidor rodando na porta ${PORT} (host ${HOST})`);
-});
-
