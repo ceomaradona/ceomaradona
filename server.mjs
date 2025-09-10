@@ -1,121 +1,124 @@
-// server.mjs — API oficial (Express + Supabase)
+// server.mjs — API com Supabase (coluna user_id corrigida)
+
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { createClient } from '@supabase/supabase-js';
 
-// --- Ambiente ---
-const { SUPABASE_URL, SUPABASE_KEY, PORT = 3000 } = process.env;
+// ---- Variáveis de ambiente ----
+const { SUPABASE_URL, SUPABASE_KEY } = process.env;
+const PORT = Number(process.env.PORT ?? 8080);
+const HOST = '0.0.0.0';
+
 if (!SUPABASE_URL || !SUPABASE_KEY) {
-  console.error('Faltam SUPABASE_URL e/ou SUPABASE_KEY nas variáveis de ambiente.');
+  console.error('Faltam SUPABASE_URL e/ou SUPABASE_KEY nas variáveis de ambiente');
   process.exit(1);
 }
 
-// --- Supabase ---
+// ---- Supabase ----
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// --- App ---
+// ---- App Express ----
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ---- Health (plaintext) ----
-app.get('/health', (_req, res) => {
-  res.type('text/plain').send('ok');
-});
+// ---- Rotas básicas ----
+// Healthcheck simples (texto)
+app.get('/health', (_req, res) => res.type('text/plain').send('ok'));
 
-// ---- Raiz (JSON simples) ----
+// Página raiz (JSON)
 app.get('/', (_req, res) => {
   res.status(200).json({ ok: true, ts: new Date().toISOString() });
 });
 
-// -------- Rotas de subscriptions ----------
+// ---- Helpers comuns ----
+function getUserId(req) {
+  // aceita ?user_id=... ou header x-user-id
+  return (req.query.user_id || req.get('x-user-id') || '').toString().trim();
+}
+
+function mapSupabaseError(error) {
+  return error?.message || 'Erro desconhecido';
+}
+
+// ---- Rotas de subscriptions ----
 
 // 1) Histórico completo do usuário
 // GET /subscriptions/history?user_id=UUID
-app.get('/subscriptions/history', async (req, res, next) => {
-  try {
-    const { user_id } = req.query;
-    if (!user_id) return res.status(400).json({ status: 'error', message: 'user_id é obrigatório' });
+app.get('/subscriptions/history', async (req, res) => {
+  const user_id = getUserId(req);
+  if (!user_id) return res.status(400).json({ status: 'error', message: 'Informe user_id' });
 
-    const { data, error } = await supabase
-      .from('subscriptions')
-      .select('*')
-      .eq('id_do_usuario', user_id)
-      .order('data_de_inicio', { ascending: false });
+  const { data, error } = await supabase
+    .from('subscriptions')
+    .select('*')
+    .eq('user_id', user_id)
+    .order('created_at', { ascending: false });
 
-    if (error) throw error;
-    res.json({ status: 'ok', items: data ?? [] });
-  } catch (err) {
-    next(err);
-  }
+  if (error) return res.status(500).json({ status: 'error', message: mapSupabaseError(error) });
+  return res.json({ status: 'ok', data });
 });
 
 // 2) Última assinatura do usuário
 // GET /subscriptions/latest?user_id=UUID
-app.get('/subscriptions/latest', async (req, res, next) => {
-  try {
-    const { user_id } = req.query;
-    if (!user_id) return res.status(400).json({ status: 'error', message: 'user_id é obrigatório' });
+app.get('/subscriptions/latest', async (req, res) => {
+  const user_id = getUserId(req);
+  if (!user_id) return res.status(400).json({ status: 'error', message: 'Informe user_id' });
 
-    const { data, error } = await supabase
-      .from('subscriptions')
-      .select('*')
-      .eq('id_do_usuario', user_id)
-      .order('data_de_inicio', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+  const { data, error } = await supabase
+    .from('subscriptions')
+    .select('*')
+    .eq('user_id', user_id)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
-    if (error) throw error;
-    res.json({ status: 'ok', latest: data ?? null });
-  } catch (err) {
-    next(err);
-  }
+  if (error) return res.status(500).json({ status: 'error', message: mapSupabaseError(error) });
+  return res.json({ status: 'ok', data });
 });
 
-// 3) Contagem de assinaturas ativas (status = 'ativo')
-app.get('/subscriptions/count/active', async (_req, res, next) => {
-  try {
-    const { count, error } = await supabase
-      .from('subscriptions')
-      .select('*', { count: 'exact', head: true })
-      .eq('status', 'ativo');
+// 3) Contagem de assinaturas ativas (geral)
+// GET /subscriptions/count/active
+app.get('/subscriptions/count/active', async (_req, res) => {
+  // Considera status 'ativo' (pt) e 'active' (en)
+  const { data, error } = await supabase
+    .from('subscriptions')
+    .select('id', { count: 'exact', head: true })
+    .in('status', ['ativo', 'active']);
 
-    if (error) throw error;
-    res.json({ status: 'ok', count: count ?? 0 });
-  } catch (err) {
-    next(err);
-  }
+  if (error) return res.status(500).json({ status: 'error', message: mapSupabaseError(error) });
+  return res.json({ status: 'ok', count: data === null ? 0 : data.length ?? 0 });
 });
 
 // 4) Assinaturas ativas por usuário
 // GET /subscriptions/active-by-user?user_id=UUID
-app.get('/subscriptions/active-by-user', async (req, res, next) => {
-  try {
-    const { user_id } = req.query;
-    if (!user_id) return res.status(400).json({ status: 'error', message: 'user_id é obrigatório' });
+app.get('/subscriptions/active-by-user', async (req, res) => {
+  const user_id = getUserId(req);
+  if (!user_id) return res.status(400).json({ status: 'error', message: 'Informe user_id' });
 
-    const { data, error } = await supabase
-      .from('subscriptions')
-      .select('*')
-      .eq('id_do_usuario', user_id)
-      .eq('status', 'ativo');
+  const { data, error } = await supabase
+    .from('subscriptions')
+    .select('*')
+    .eq('user_id', user_id)
+    .in('status', ['ativo', 'active'])
+    .order('created_at', { ascending: false });
 
-    if (error) throw error;
-    res.json({ status: 'ok', active_count: data?.length ?? 0, items: data ?? [] });
-  } catch (err) {
-    next(err);
-  }
+  if (error) return res.status(500).json({ status: 'error', message: mapSupabaseError(error) });
+  return res.json({ status: 'ok', data });
 });
 
-// ---- Tratador de erro global (sempre JSON) ----
+// ---- Erro 404
+app.use((_req, res) => res.status(404).json({ status: 'error', message: 'Not found' }));
+
+// ---- Erro global
 app.use((err, _req, res, _next) => {
-  console.error(err);
-  res.status(500).json({ status: 'error', message: err.message ?? 'internal error' });
+  console.error('Erro não tratado:', err);
+  res.status(500).json({ status: 'error', message: 'Erro interno' });
 });
 
-// ---- Start ----
-const HOST = '0.0.0.0';
+// ---- Start
 app.listen(PORT, HOST, () => {
   console.log(`Servidor rodando na porta ${PORT} (host ${HOST})`);
 });
+
